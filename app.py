@@ -4,10 +4,10 @@ import plotly.express as px
 import io
 
 st.set_page_config(page_title="Gestão de Entregas", layout="wide")
-st.title("🚚 Painel Operacional e Controle de Entregas por Lote")
+st.title("🚚 Painel Operacional - Controle de Entregas e Prazos")
 st.markdown("---")
 
-# Habilitado para aceitar múltiplos arquivos ao mesmo tempo
+# Upload de múltiplos arquivos
 uploaded_files = st.file_uploader(
     "Faça o upload das planilhas (.csv ou .xlsx)", 
     type=["csv", "xlsx"], 
@@ -18,7 +18,6 @@ if uploaded_files:
     try:
         lista_dfs = []
         
-        # Processa cada arquivo enviado
         for file in uploaded_files:
             df_temp = None
             if file.name.endswith('.csv'):
@@ -39,24 +38,33 @@ if uploaded_files:
             if df_temp is not None:
                 lista_dfs.append(df_temp)
 
-        # Unifica todas as planilhas em um único DataFrame
         if lista_dfs:
             df = pd.concat(lista_dfs, ignore_index=True)
-
-            # Limpa espaços em branco nos nomes das colunas
             df.columns = df.columns.str.strip()
 
-            # Converte e formata as datas de forma flexível
+            # 1. Tratamento da Data/Hora Real da Entrega
             df['DATA_HORA_DT'] = pd.to_datetime(df['DATA_HORA_APROXIMADA'], dayfirst=True, errors='coerce')
-            df['DATA'] = df['DATA_HORA_DT'].dt.strftime('%d/%m/%Y').fillna('Sem Data')
+            df['DATA_REAL'] = df['DATA_HORA_DT'].dt.strftime('%d/%m/%Y').fillna('Sem Data')
             df['HORA'] = df['DATA_HORA_DT'].dt.strftime('%H:%M').fillna('N/A')
 
-            # Padroniza texto dos campos de filtro
+            # 2. Tratamento da Data Prevista da Entrega
+            if 'DAT_PREVISTA_ENTREGA' in df.columns:
+                df['DAT_PREVISTA_DT'] = pd.to_datetime(df['DAT_PREVISTA_ENTREGA'], dayfirst=True, errors='coerce')
+                df['DATA_PREVISTA'] = df['DAT_PREVISTA_DT'].dt.strftime('%d/%m/%Y').fillna('Sem Data Prevista')
+            else:
+                df['DAT_PREVISTA_DT'] = pd.NaT
+                df['DATA_PREVISTA'] = 'Não Informada'
+
+            # 3. Cálculo da Diferença em Dias (Data Real - Data Prevista)
+            df['DIFERENCA_DIAS'] = (df['DATA_HORA_DT'].dt.floor('D') - df['DAT_PREVISTA_DT'].dt.floor('D')).dt.days
+
+            # Padronização de texto para os filtros
             df['NOM_BASE_OPERACIONAL_STR'] = df['NOM_BASE_OPERACIONAL'].astype(str).str.strip()
             df['NOM_MUNICIPIO_STR'] = df['NOM_MUNICIPIO'].astype(str).str.strip()
             df['NOM_UNIDADE_LEITURA_STR'] = df['NOM_UNIDADE_LEITURA'].astype(str).str.strip()
             df['COD_AGENTE_COMERCIAL_STR'] = df['COD_AGENTE_COMERCIAL'].astype(str).str.strip()
 
+            # Barra Lateral - Filtros
             st.sidebar.header("🎯 Filtros")
 
             bases_disponiveis = sorted([x for x in df['NOM_BASE_OPERACIONAL_STR'].unique() if x and x != 'nan'])
@@ -71,8 +79,11 @@ if uploaded_files:
             agentes_disponiveis = sorted([x for x in df['COD_AGENTE_COMERCIAL_STR'].unique() if x and x != 'nan'])
             filtro_agente = st.sidebar.multiselect("Código do Agente", options=agentes_disponiveis, default=agentes_disponiveis)
 
-            datas_disponiveis = sorted([x for x in df['DATA'].unique() if x and x != 'nan'])
-            filtro_data = st.sidebar.multiselect("Data da Entrega", options=datas_disponiveis, default=datas_disponiveis)
+            datas_disponiveis = sorted([x for x in df['DATA_REAL'].unique() if x and x != 'nan'])
+            filtro_data_real = st.sidebar.multiselect("Data Real da Entrega", options=datas_disponiveis, default=datas_disponiveis)
+
+            datas_previstas_disp = sorted([x for x in df['DATA_PREVISTA'].unique() if x and x != 'nan'])
+            filtro_data_prevista = st.sidebar.multiselect("Data Prevista", options=datas_previstas_disp, default=datas_previstas_disp)
 
             # Aplicação dos Filtros
             df_filtrado = df[
@@ -80,23 +91,24 @@ if uploaded_files:
                 (df['NOM_MUNICIPIO_STR'].isin(filtro_municipio)) &
                 (df['NOM_UNIDADE_LEITURA_STR'].isin(filtro_unidade)) &
                 (df['COD_AGENTE_COMERCIAL_STR'].isin(filtro_agente)) &
-                (df['DATA'].isin(filtro_data))
+                (df['DATA_REAL'].isin(filtro_data_real)) &
+                (df['DATA_PREVISTA'].isin(filtro_data_prevista))
             ]
 
             if df_filtrado.empty:
                 st.warning("Nenhum dado encontrado com os filtros selecionados.")
             else:
-                # Indicadores
+                # Indicadores Principais
                 col1, col2, col3, col4, col5 = st.columns(5)
                 col1.metric("Total de Entregas", len(df_filtrado))
                 col2.metric("Agentes Ativos", df_filtrado['COD_AGENTE_COMERCIAL_STR'].nunique())
                 col3.metric("Bases Atendidas", df_filtrado['NOM_BASE_OPERACIONAL_STR'].nunique())
                 col4.metric("Cidades Atendidas", df_filtrado['NOM_MUNICIPIO_STR'].nunique())
-                col5.metric("Unid. Leitura / Lotes", df_filtrado['NOM_UNIDADE_LEITURA_STR'].nunique())
+                col5.metric("Lotes / ULs", df_filtrado['NOM_UNIDADE_LEITURA_STR'].nunique())
 
                 st.markdown("---")
 
-                # Funções para pegar a 1ª e última hora por agrupamento
+                # Funções para pegar a 1ª e última hora por lote
                 def min_hora(series):
                     valid = series.dropna()
                     return valid.min().strftime('%H:%M') if not valid.empty else "N/A"
@@ -105,9 +117,17 @@ if uploaded_files:
                     valid = series.dropna()
                     return valid.max().strftime('%H:%M') if not valid.empty else "N/A"
 
-                # Agrupamento detalhado por DIA, AGENTE, BASE, CIDADE e UNIDADE DE LEITURA
+                def dif_dias_func(series):
+                    valid = series.dropna()
+                    if not valid.empty:
+                        val = int(valid.iloc[0])
+                        return f"+{val} dia(s)" if val > 0 else (f"{val} dia(s)" if val < 0 else "No prazo (0d)")
+                    return "N/A"
+
+                # Agrupamento detalhado incluindo DATA PREVISTA e DIFERENÇA EM DIAS
                 df_resumo = df_filtrado.groupby([
-                    'DATA', 
+                    'DATA_REAL',
+                    'DATA_PREVISTA',
                     'COD_AGENTE_COMERCIAL_STR', 
                     'NOM_BASE_OPERACIONAL_STR', 
                     'NOM_MUNICIPIO_STR',
@@ -115,21 +135,24 @@ if uploaded_files:
                 ]).agg(
                     TOTAL_ENTREGAS=('SEQ_TAREFA', 'count'),
                     HORARIO_INICIAL=('DATA_HORA_DT', min_hora),
-                    HORARIO_FINAL=('DATA_HORA_DT', max_hora)
+                    HORARIO_FINAL=('DATA_HORA_DT', max_hora),
+                    DIFERENCA_DIAS=('DIFERENCA_DIAS', dif_dias_func)
                 ).reset_index()
 
                 df_resumo.columns = [
-                    'Data', 
+                    'Data Realização', 
+                    'Data Prevista',
                     'Código Agente', 
                     'Base Operacional', 
                     'Cidade', 
                     'Unidade de Leitura',
                     'Total de Entregas', 
-                    'Horário Inicial (1ª na UL)', 
-                    'Horário Final (Última na UL)'
+                    'Horário Inicial (1ª)', 
+                    'Horário Final (Última)',
+                    'Diferença (Dias)'
                 ]
 
-                # Gráficos
+                # Gráficos Visualizadores
                 col_graf1, col_graf2 = st.columns(2)
 
                 with col_graf1:
@@ -145,18 +168,18 @@ if uploaded_files:
                     st.plotly_chart(fig_base, use_container_width=True)
 
                 st.markdown("---")
-                st.subheader("📋 Resumo Diário por Agente, Cidade e Unidade de Leitura")
+                st.subheader("📋 Resumo Diário por Lote e Status de Entrega")
                 st.dataframe(df_resumo, use_container_width=True)
 
                 # Download em Excel
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df_resumo.to_excel(writer, index=False, sheet_name='Resumo Lotes Entregas')
+                    df_resumo.to_excel(writer, index=False, sheet_name='Resumo Prazos Lotes')
 
                 st.download_button(
-                    label="📥 Baixar Planilha Tratada Consolidada (Excel)",
+                    label="📥 Baixar Planilha Tratada com Prazos (Excel)",
                     data=buffer.getvalue(),
-                    file_name="resumo_entregas_consolidado.xlsx",
+                    file_name="resumo_entregas_prazos.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
