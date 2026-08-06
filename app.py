@@ -75,30 +75,26 @@ if uploaded_file is not None:
 
                 st.markdown("---")
 
-                def min_hora(series):
-                    valid = series.dropna()
-                    return valid.min().strftime('%H:%M') if not valid.empty else "N/A"
+def min_hora(series):
+    valid = series.dropna()
+    return valid.min().strftime('%H:%M') if not valid.empty else "N/A"
 
-                def max_hora(series):
-                    valid = series.dropna()
-                    return valid.max().strftime('%H:%M') if not valid.empty else "N/A"
+def max_hora(series):
+    valid = series.dropna()
+    return valid.max().strftime('%H:%M') if not valid.empty else "N/A"
 
-                def lista_cidades(series):
-                    cidades = series.dropna().unique()
-                    return ", ".join(cidades)
+# Agrupando TAMBÉM pelo Município:
+df_resumo = df_filtrado.groupby(['DATA', 'COD_AGENTE_COMERCIAL', 'NOM_BASE_OPERACIONAL', 'NOM_MUNICIPIO']).agg(
+    TOTAL_ENTREGAS=('SEQ_TAREFA', 'count'),
+    HORARIO_INICIAL=('DATA_HORA_DT', min_hora),
+    HORARIO_FINAL=('DATA_HORA_DT', max_hora)
+).reset_index()
 
-                df_resumo = df_filtrado.groupby(['DATA', 'COD_AGENTE_COMERCIAL', 'NOM_BASE_OPERACIONAL']).agg(
-                    TOTAL_ENTREGAS=('SEQ_TAREFA', 'count'),
-                    HORARIO_INICIAL=('DATA_HORA_DT', min_hora),
-                    HORARIO_FINAL=('DATA_HORA_DT', max_hora),
-                    CIDADES=('NOM_MUNICIPIO', lista_cidades)
-                ).reset_index()
-
-                df_resumo.columns = [
-                    'Data', 'Código Agente', 'Base Operacional', 
-                    'Total de Entregas', 'Horário Inicial (1ª)', 
-                    'Horário Final (Última)', 'Cidades Atendidas'
-                ]
+df_resumo.columns = [
+    'Data', 'Código Agente', 'Base Operacional', 'Cidade',
+    'Total de Entregas', 'Horário Inicial (1ª na cidade)', 
+    'Horário Final (Última na cidade)'
+]
 
                 col_graf1, col_graf2 = st.columns(2)
 
