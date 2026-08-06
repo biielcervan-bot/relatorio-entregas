@@ -13,7 +13,6 @@ if uploaded_file is not None:
     try:
         df = None
         if uploaded_file.name.endswith('.csv'):
-            # Tenta diferentes codificações de acentuação do Windows e Excel Brasil
             for enc in ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']:
                 try:
                     uploaded_file.seek(0)
@@ -31,28 +30,37 @@ if uploaded_file is not None:
             df = pd.read_excel(uploaded_file)
 
         if df is not None:
-            df['DATA_HORA_DT'] = pd.to_datetime(df['DATA_HORA_APROXIMADA'], format='%d/%m/%Y %H:%M', errors='coerce')
-            df['DATA'] = df['DATA_HORA_DT'].dt.date
-            df['HORA'] = df['DATA_HORA_DT'].dt.strftime('%H:%M')
+            # Limpa espaços em branco nos nomes das colunas
+            df.columns = df.columns.str.strip()
+
+            # Converte e formata as datas de forma flexível e segura
+            df['DATA_HORA_DT'] = pd.to_datetime(df['DATA_HORA_APROXIMADA'], dayfirst=True, errors='coerce')
+            df['DATA'] = df['DATA_HORA_DT'].dt.strftime('%d/%m/%Y').fillna('Sem Data')
+            df['HORA'] = df['DATA_HORA_DT'].dt.strftime('%H:%M').fillna('N/A')
+
+            # Padroniza texto dos filtros
+            df['NOM_BASE_OPERACIONAL_STR'] = df['NOM_BASE_OPERACIONAL'].astype(str).str.strip()
+            df['NOM_MUNICIPIO_STR'] = df['NOM_MUNICIPIO'].astype(str).str.strip()
+            df['COD_AGENTE_COMERCIAL_STR'] = df['COD_AGENTE_COMERCIAL'].astype(str).str.strip()
 
             st.sidebar.header("🎯 Filtros")
 
-            bases_disponiveis = sorted(df['NOM_BASE_OPERACIONAL'].dropna().unique())
+            bases_disponiveis = sorted([x for x in df['NOM_BASE_OPERACIONAL_STR'].unique() if x and x != 'nan'])
             filtro_base = st.sidebar.multiselect("Base Operacional", options=bases_disponiveis, default=bases_disponiveis)
 
-            municipios_disponiveis = sorted(df['NOM_MUNICIPIO'].dropna().unique())
+            municipios_disponiveis = sorted([x for x in df['NOM_MUNICIPIO_STR'].unique() if x and x != 'nan'])
             filtro_municipio = st.sidebar.multiselect("Município", options=municipios_disponiveis, default=municipios_disponiveis)
 
-            agentes_disponiveis = sorted(df['COD_AGENTE_COMERCIAL'].dropna().unique())
+            agentes_disponiveis = sorted([x for x in df['COD_AGENTE_COMERCIAL_STR'].unique() if x and x != 'nan'])
             filtro_agente = st.sidebar.multiselect("Código do Agente", options=agentes_disponiveis, default=agentes_disponiveis)
 
-            datas_disponiveis = sorted(df['DATA'].dropna().unique())
-            filtro_data = st.sidebar.multiselect("Data da Entrega", options=datas_disponiveis, default=datas_disponiveis) if datas_disponiveis else []
+            datas_disponiveis = sorted([x for x in df['DATA'].unique() if x and x != 'nan'])
+            filtro_data = st.sidebar.multiselect("Data da Entrega", options=datas_disponiveis, default=datas_disponiveis)
 
             df_filtrado = df[
-                (df['NOM_BASE_OPERACIONAL'].isin(filtro_base)) &
-                (df['NOM_MUNICIPIO'].isin(filtro_municipio)) &
-                (df['COD_AGENTE_COMERCIAL'].isin(filtro_agente)) &
+                (df['NOM_BASE_OPERACIONAL_STR'].isin(filtro_base)) &
+                (df['NOM_MUNICIPIO_STR'].isin(filtro_municipio)) &
+                (df['COD_AGENTE_COMERCIAL_STR'].isin(filtro_agente)) &
                 (df['DATA'].isin(filtro_data))
             ]
 
@@ -61,9 +69,9 @@ if uploaded_file is not None:
             else:
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Total de Entregas", len(df_filtrado))
-                col2.metric("Total de Agentes Ativos", df_filtrado['COD_AGENTE_COMERCIAL'].nunique())
-                col3.metric("Bases Atendidas", df_filtrado['NOM_BASE_OPERACIONAL'].nunique())
-                col4.metric("Cidades Atendidas", df_filtrado['NOM_MUNICIPIO'].nunique())
+                col2.metric("Total de Agentes Ativos", df_filtrado['COD_AGENTE_COMERCIAL_STR'].nunique())
+                col3.metric("Bases Atendidas", df_filtrado['NOM_BASE_OPERACIONAL_STR'].nunique())
+                col4.metric("Cidades Atendidas", df_filtrado['NOM_MUNICIPIO_STR'].nunique())
 
                 st.markdown("---")
 
@@ -96,14 +104,14 @@ if uploaded_file is not None:
 
                 with col_graf1:
                     st.subheader("🏙️ Entregas por Cidade")
-                    df_cidade = df_filtrado.groupby('NOM_MUNICIPIO').size().reset_index(name='Qtd Entregas')
-                    fig_cidade = px.bar(df_cidade, x='NOM_MUNICIPIO', y='Qtd Entregas', text_auto=True, color_discrete_sequence=['#1f77b4'])
+                    df_cidade = df_filtrado.groupby('NOM_MUNICIPIO_STR').size().reset_index(name='Qtd Entregas')
+                    fig_cidade = px.bar(df_cidade, x='NOM_MUNICIPIO_STR', y='Qtd Entregas', text_auto=True, labels={'NOM_MUNICIPIO_STR': 'Município'}, color_discrete_sequence=['#1f77b4'])
                     st.plotly_chart(fig_cidade, use_container_width=True)
 
                 with col_graf2:
                     st.subheader("🏢 Entregas por Base Operacional")
-                    df_base_graf = df_filtrado.groupby('NOM_BASE_OPERACIONAL').size().reset_index(name='Qtd Entregas')
-                    fig_base = px.bar(df_base_graf, x='NOM_BASE_OPERACIONAL', y='Qtd Entregas', text_auto=True, color_discrete_sequence=['#2ca02c'])
+                    df_base_graf = df_filtrado.groupby('NOM_BASE_OPERACIONAL_STR').size().reset_index(name='Qtd Entregas')
+                    fig_base = px.bar(df_base_graf, x='NOM_BASE_OPERACIONAL_STR', y='Qtd Entregas', text_auto=True, labels={'NOM_BASE_OPERACIONAL_STR': 'Base Operacional'}, color_discrete_sequence=['#2ca02c'])
                     st.plotly_chart(fig_base, use_container_width=True)
 
                 st.markdown("---")
