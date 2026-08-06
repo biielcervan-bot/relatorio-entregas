@@ -7,29 +7,42 @@ st.set_page_config(page_title="Gestão de Entregas", layout="wide")
 st.title("🚚 Painel Operacional e Controle de Entregas por Lote")
 st.markdown("---")
 
-uploaded_file = st.file_uploader("Faça o upload da planilha (.csv ou .xlsx)", type=["csv", "xlsx"])
+# Habilitado para aceitar múltiplos arquivos ao mesmo tempo
+uploaded_files = st.file_uploader(
+    "Faça o upload das planilhas (.csv ou .xlsx)", 
+    type=["csv", "xlsx"], 
+    accept_multiple_files=True
+)
 
-if uploaded_file is not None:
+if uploaded_files:
     try:
-        df = None
-        if uploaded_file.name.endswith('.csv'):
-            for enc in ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']:
-                try:
-                    uploaded_file.seek(0)
-                    temp_df = pd.read_csv(uploaded_file, sep=';', encoding=enc)
-                    if len(temp_df.columns) <= 1:
-                        uploaded_file.seek(0)
-                        temp_df = pd.read_csv(uploaded_file, sep=',', encoding=enc)
-                    df = temp_df
-                    break
-                except Exception:
-                    continue
-            if df is None:
-                st.error("Não foi possível ler o arquivo CSV. Verifique o formato do arquivo.")
-        else:
-            df = pd.read_excel(uploaded_file)
+        lista_dfs = []
+        
+        # Processa cada arquivo enviado
+        for file in uploaded_files:
+            df_temp = None
+            if file.name.endswith('.csv'):
+                for enc in ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']:
+                    try:
+                        file.seek(0)
+                        temp = pd.read_csv(file, sep=';', encoding=enc)
+                        if len(temp.columns) <= 1:
+                            file.seek(0)
+                            temp = pd.read_csv(file, sep=',', encoding=enc)
+                        df_temp = temp
+                        break
+                    except Exception:
+                        continue
+            else:
+                df_temp = pd.read_excel(file)
 
-        if df is not None:
+            if df_temp is not None:
+                lista_dfs.append(df_temp)
+
+        # Unifica todas as planilhas em um único DataFrame
+        if lista_dfs:
+            df = pd.concat(lista_dfs, ignore_index=True)
+
             # Limpa espaços em branco nos nomes das colunas
             df.columns = df.columns.str.strip()
 
@@ -141,13 +154,13 @@ if uploaded_file is not None:
                     df_resumo.to_excel(writer, index=False, sheet_name='Resumo Lotes Entregas')
 
                 st.download_button(
-                    label="📥 Baixar Planilha Tratada (Excel)",
+                    label="📥 Baixar Planilha Tratada Consolidada (Excel)",
                     data=buffer.getvalue(),
-                    file_name="resumo_entregas_lotes.xlsx",
+                    file_name="resumo_entregas_consolidado.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
     except Exception as e:
-        st.error(f"Ocorreu um erro ao processar o arquivo: {e}")
+        st.error(f"Ocorreu um erro ao processar os arquivos: {e}")
 else:
-    st.info("👆 Por favor, envie o arquivo de entregas para iniciar.")
+    st.info("👆 Por favor, envie uma ou mais planilhas de entregas para iniciar.")
